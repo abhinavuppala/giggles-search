@@ -1,0 +1,5 @@
+{
+    "url": "https://something.com",
+    "encoding": "utf-8",
+    "content": "<html><head><title>Machine Learning</title><script>secret</script></head><body><h2>Machine <strong>learning</strong></h2><p>Machine learning <b>learning</b></p><style>hidden</style></body></html>"
+}
