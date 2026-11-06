@@ -8,7 +8,6 @@ from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from nltk.stem import PorterStemmer
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
 # any alphanumeric sequence is considered a word
 TOKEN_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
@@ -102,4 +101,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
     main()

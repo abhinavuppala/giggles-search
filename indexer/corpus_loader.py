@@ -10,8 +10,6 @@ from urllib.parse import (
 )
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
-
 
 def normalize_url(url):
     """
@@ -139,4 +137,5 @@ def main():
     print(f"Metadata saved to: {args.output}")
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
     main()
