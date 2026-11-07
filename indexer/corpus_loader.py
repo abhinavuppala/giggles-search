@@ -8,6 +8,7 @@ from urllib.parse import (
     urlsplit, urlunsplit, urlencode,
     quote, parse_qsl
 )
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +46,20 @@ def document_id(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()[:32]
 
 
-def iterate_docs(corpus_dir: Path):
+def iterate_docs(corpus_dir: Path, completed_paths: Optional[set] = None):
     """
     Generator. yield path and document one at a time. Conditions
     - must be JSON
     - must have the expected keys (url, content, encoding)
     """
+    completed_paths = completed_paths if completed_paths is not None else set()
+
+    for path in sorted(corpus_dir.rglob("*.json")):
+        # skip files from completed batches before reading their contents
+        relative_path = path.relative_to(corpus_dir).as_posix()
+        if relative_path in completed_paths:
+            continue
+
     for path in sorted(corpus_dir.rglob("*.json")):
         # read JSON object
         try:
