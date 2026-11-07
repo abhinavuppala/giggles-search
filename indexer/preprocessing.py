@@ -36,44 +36,48 @@ def process_document(content: str) -> dict[str, dict[str, int]]:
     soup = BeautifulSoup(content, "html.parser")
     frequencies = {}
 
-    # recursive DFS
+    # iterative DFS
     # since HTML elements are a tree, we can track
     # each of the special things we want to check
-    def traverse(node, title=False, heading=False, bold=False):
-        if isinstance(node, Comment):
-            return
+    # (originally tried recursive DFS but we exceeded max recursion depth)
+    def traverse(root):
+        stack = [(root, False, False, False)]
 
-        # string of some kind - count frequencies
-        if isinstance(node, NavigableString):
-            for token in normalize_tokens(str(node)):
-                if token not in frequencies:
-                    frequencies[token] = {
-                        "tf": 0,
-                        "title_tf": 0,
-                        "heading_tf": 0,
-                        "bold_tf": 0,
-                    }
+        while stack:
+            node, title, heading, bold = stack.pop()
 
-                counts = frequencies[token]
-                counts["tf"] += 1
-                counts["title_tf"] += int(title)
-                counts["heading_tf"] += int(heading)
-                counts["bold_tf"] += int(bold)
+            if isinstance(node, Comment):
+                continue
 
-            return
+            if isinstance(node, NavigableString):
+                for token in normalize_tokens(str(node)):
+                    if token not in frequencies:
+                        frequencies[token] = {
+                            "tf": 0,
+                            "title_tf": 0,
+                            "heading_tf": 0,
+                            "bold_tf": 0,
+                        }
 
-        # not a tag - exit
-        if not isinstance(node, Tag) or node.name in IGNORE_TAGS:
-            return
+                    counts = frequencies[token]
+                    counts["tf"] += 1
+                    counts["title_tf"] += int(title)
+                    counts["heading_tf"] += int(heading)
+                    counts["bold_tf"] += int(bold)
 
-        # propagate formatting information to children
-        title = title or node.name in TITLE_TAGS
-        heading = heading or node.name in HEADING_TAGS
-        bold = bold or node.name in BOLD_TAGS
+                continue
 
-        # tag - traverse children recursively
-        for child in node.children:
-            traverse(child, title, heading, bold)
+            if not isinstance(node, Tag) or node.name in IGNORE_TAGS:
+                continue
+
+            # propagate formatting information to children
+            title = title or node.name == "title"
+            heading = heading or node.name in HEADING_TAGS
+            bold = bold or node.name in BOLD_TAGS
+
+            # reverse children so traversal preserves document order
+            for child in reversed(list(node.children)):
+                stack.append((child, title, heading, bold))
 
     traverse(soup)
     return frequencies
