@@ -1,12 +1,19 @@
 import argparse
 import json
 import logging
+import math
 from pathlib import Path
 import time
 
 from indexer.preprocessing import normalize_tokens
 
 logger = logging.getLogger(__name__)
+
+# tf-idf ranking weights
+BODY_WEIGHT = 1.0
+TITLE_WEIGHT = 3.0
+HEADING_WEIGHT = 2.0
+BOLD_WEIGHT = 1.0
 
 
 def load_index(index_dir: Path) -> tuple[dict, dict]:
@@ -72,6 +79,7 @@ def search(query: str, file, manifest: dict, documents: dict, limit: int = 5) ->
     """
     Search using AND across every unique normalized query term
     Return up to limit URLs and the total number of matching documents
+    Documents are ranked by tf-idf
     """
     # remove unique elements while retaining original order
     terms = list(dict.fromkeys(normalize_tokens(query)))
@@ -83,13 +91,30 @@ def search(query: str, file, manifest: dict, documents: dict, limit: int = 5) ->
         return [], 0
     terms.sort(key=lambda term: manifest[term]["df"])
 
-    matches = get_postings(file, manifest, terms[0])
+    postings = {term: get_postings(file, manifest, term) for term in terms}
+    matches = postings[terms[0]]
     for term in terms[1:]:
         if not matches:
             break
-        matches = intersect_postings(matches, get_postings(file, manifest, term))
+        matches = intersect_postings(matches, postings[term])
 
-    urls = [documents[doc_id] for doc_id in list(matches)[:limit]]
+    # combine term frequency with important tag counts before applying tf-idf
+    # we give different weightage to body, title, heading, bold
+    scores = {}
+    for doc_id in matches:
+        score = 0.0
+        for term in terms:
+            counts = postings[term][doc_id]
+            weighted_tf = (BODY_WEIGHT * counts["tf"] +
+                           TITLE_WEIGHT * counts["title_tf"] +
+                           HEADING_WEIGHT * counts["heading_tf"] +
+                           BOLD_WEIGHT * counts["bold_tf"])
+            idf = math.log((len(documents) + 1) / (manifest[term]["df"] + 1)) + 1
+            score += (1 + math.log(weighted_tf)) * idf
+        scores[doc_id] = score
+
+    ranked_ids = sorted(matches, key=lambda doc_id: (-scores[doc_id], doc_id))
+    urls = [documents[doc_id] for doc_id in ranked_ids[:limit]]
     return urls, len(matches)
 
 
