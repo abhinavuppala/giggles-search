@@ -1,0 +1,217 @@
+/* ============================================
+   Google 1998 — Faithful Recreation Stylesheet
+   ============================================ */
+
+/* Reset & Base */
+*,
+*::before,
+*::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, Helvetica, sans-serif;
+    background-color: #ffffff;
+    color: #000000;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* Header */
+header {
+    text-align: center;
+    padding: 30px 20px 10px;
+}
+
+.logo {
+    max-width: 280px;
+    height: auto;
+}
+
+/* Search Container */
+.search-container {
+    width: 100%;
+    max-width: 600px;
+    padding: 0 20px;
+}
+
+.search-box {
+    background-color: #eaeaea;
+    padding: 16px 24px 20px;
+    margin: 0 auto;
+    text-align: center;
+}
+
+.search-label {
+    font-size: 15px;
+    margin-bottom: 10px;
+}
+
+.search-input {
+    width: 280px;
+    max-width: 100%;
+    padding: 4px 6px;
+    font-size: 14px;
+    border: 1px solid #999;
+    outline: none;
+    margin-bottom: 8px;
+}
+
+.search-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+}
+
+.btn {
+    padding: 3px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    border: 1px solid #999;
+    background: #e0e0e0;
+}
+
+.btn:hover {
+    background: #d0d0d0;
+}
+
+.btn:active {
+    background: #c0c0c0;
+}
+
+/* Info Cards */
+.info-cards {
+    display: flex;
+    justify-content: center;
+    gap: 5px;
+    max-width: 600px;
+    margin: 5px auto 0;
+    padding: 0 20px;
+}
+
+.card {
+    flex: 1;
+    padding: 10px 12px;
+    text-align: center;
+    line-height: 1.5;
+    font-size: 13px;
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.card h3 {
+    font-size: 13px;
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+
+.card a {
+    color: #0000cc;
+    text-decoration: underline;
+    font-size: 13px;
+}
+
+.card a:hover {
+    color: #cc0000;
+}
+
+.card-special {
+    background-color: #7EE5DA;
+}
+
+.card-help {
+    background-color: #70ccc2;
+}
+
+.card-subscribe {
+    background-color: #62B3AA;
+}
+
+.card-subscribe p {
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.email-input {
+    width: 120px;
+    padding: 2px 4px;
+    font-size: 12px;
+    border: 1px solid #999;
+    margin-bottom: 4px;
+}
+
+.btn-subscribe {
+    padding: 2px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    border: 1px solid #999;
+    background: #e0e0e0;
+    margin-bottom: 4px;
+}
+
+.btn-subscribe:hover {
+    background: #d0d0d0;
+}
+
+/* Footer */
+footer {
+    text-align: center;
+    padding: 40px 20px 20px;
+    font-size: 12px;
+    color: #666;
+    margin-top: auto;
+}
+
+footer .meta {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #999;
+}
+
+footer .meta a {
+    color: #0000cc;
+}
+
+.giggles-logo {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 88px;
+    font-weight: bold;
+    letter-spacing: -5px;
+    text-align: center;
+    line-height: 1.2;
+    text-shadow: 2px 3px 1px #999;
+}
+
+.blue { color: #3366cc; }
+.red { color: #dc3912; }
+.yellow { color: #ffcc00; }
+.green { color: #109618; }
+
+
+/* Responsive */
+@media (max-width: 480px) {
+    .logo {
+        max-width: 200px;
+    }
+
+    .info-cards {
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .card {
+        min-height: auto;
+        padding: 8px;
+    }
+
+    .search-input {
+        width: 100%;
+    }
+}
