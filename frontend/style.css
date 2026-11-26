@@ -215,3 +215,59 @@ footer .meta a {
         width: 100%;
     }
 }
+
+.summary-section,
+.results-section {
+    width: min(90%, 720px);
+    margin: 24px auto;
+    text-align: left;
+    font-family: Arial, sans-serif;
+}
+
+.summary-section {
+    border: 1px solid #aaa;
+    background: #f5f5f5;
+    padding: 12px 16px;
+    min-height: 85px;
+    box-sizing: border-box;
+}
+
+.summary-section h2 {
+    font-size: 16px;
+    margin: 0 0 10px;
+}
+
+.summary-content {
+    min-height: 40px;
+}
+
+.search-stats {
+    color: #666;
+    font-size: 13px;
+    margin-bottom: 22px;
+}
+
+.result-item {
+    margin-bottom: 22px;
+}
+
+.result-title {
+    color: #0000ee;
+    font-size: 18px;
+    text-decoration: underline;
+}
+
+.result-url {
+    color: #008000;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.result-description {
+    font-size: 13px;
+    margin: 4px 0 0;
+}
+
+[hidden] {
+    display: none !important;
+}
