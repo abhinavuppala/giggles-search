@@ -3,14 +3,10 @@ import json
 import argparse
 import hashlib
 import logging
-from urllib.parse import (
-    urlparse, urldefrag, urljoin,
-    urlsplit, urlunsplit, urlencode,
-    quote, parse_qsl
-)
-from typing import Optional
+from urllib.parse import urlsplit, urldefrag
 
 logger = logging.getLogger(__name__)
+
 
 def normalize_url(url):
     """
@@ -46,7 +42,7 @@ def document_id(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()[:32]
 
 
-def iterate_docs(corpus_dir: Path, completed_paths: Optional[set] = None):
+def iterate_docs(corpus_dir: Path, completed_paths: set[str] | None = None):
     """
     Generator. yield path and document one at a time. Conditions
     - must be JSON
@@ -60,13 +56,12 @@ def iterate_docs(corpus_dir: Path, completed_paths: Optional[set] = None):
         if relative_path in completed_paths:
             continue
 
-    for path in sorted(corpus_dir.rglob("*.json")):
         # read JSON object
         try:
             with path.open("r", encoding="utf-8") as file:
                 document = json.load(file)
-        except Exception as exc:
-            logger.warning(f"Error reading JSON: {exc}")
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            logger.warning(f"Error reading JSON {path}: {exc}")
             continue
 
         # ensure it's a dict, not a list or something unexpected
@@ -125,6 +120,7 @@ def build_document_metadata(corpus_dir: Path) -> tuple[dict[str, str], dict[str,
 
     return documents, stats
 
+
 def main():
     parser = argparse.ArgumentParser(description="Build search index from document corpus")
     parser.add_argument("corpus_dir", type=Path, help="Root folder w/ nested JSON documents")
@@ -144,6 +140,7 @@ def main():
     print(f"Indexed documents: {stats['indexed']}")
     print(f"Duplicate URLs skipped: {stats['duplicates']}")
     print(f"Metadata saved to: {args.output}")
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")

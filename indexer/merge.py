@@ -2,10 +2,14 @@ import argparse
 import heapq
 import json
 import logging
+import math
+import time
 import shutil
 import tempfile
 from contextlib import ExitStack
 from pathlib import Path
+
+from indexer.ranking_metadata import group_duplicates, calculate_pagerank
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,7 @@ def merge_indexes(partials_dir: Path, output_dir: Path) -> dict:
     Merge sorted partial indexes using a min heap.
     Write the final index and a manifest of byte offsets
     """
+    merge_started = time.perf_counter()
     if not partials_dir.is_dir():
         raise ValueError(f"Partial index directory does not exist: {partials_dir}")
     if output_dir.exists():
@@ -41,6 +46,8 @@ def merge_indexes(partials_dir: Path, output_dir: Path) -> dict:
 
     documents = {}
     total_tokens = 0
+    document_stats = {}
+    indexing_seconds = 0.0
     for batch_dir in batch_dirs:
         # ensure we only merge completed batches
         for name in ("index.jsonl", "documents.json", "metadata.json"):
@@ -55,15 +62,22 @@ def merge_indexes(partials_dir: Path, output_dir: Path) -> dict:
             documents[doc_id] = url
 
         with (batch_dir / "metadata.json").open("r", encoding="utf-8") as file:
-            total_tokens += json.load(file)["tokens"]
+            batch_metadata = json.load(file)
+            total_tokens += batch_metadata["tokens"]
+            indexing_seconds += batch_metadata.get("elapsed_seconds", 0)
+        with (batch_dir / "document_stats.json").open("r", encoding="utf-8") as file:
+            batch_stats = json.load(file)
+        if set(batch_stats) != set(batch_documents):
+            raise ValueError(f"Document statistics mismatch in {batch_dir}")
+        document_stats.update(batch_stats)
 
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     temp_dir = Path(tempfile.mkdtemp(prefix=".merge_tmp_", dir=output_dir.parent))
     try:
         manifest = {}
         total_postings = 0
+        norm_squares = {doc_id: 0.0 for doc_id in documents}
 
-        # ensure we exit the requisite files regardless of exit condition
         with ExitStack() as stack:
             files = [stack.enter_context((batch_dir / "index.jsonl").open("r", encoding="utf-8"))
                      for batch_dir in batch_dirs]
@@ -97,6 +111,7 @@ def merge_indexes(partials_dir: Path, output_dir: Path) -> dict:
                 offset = output.tell()
                 output.write((json.dumps({"term": term}, ensure_ascii=False)[:-1] + ', "postings": {').encode("utf-8"))
                 df = 0
+                idf = math.log((len(documents) + 1) / (sum(len(p) for p in posting_lists) + 1)) + 1
                 previous_id = None
                 for doc_id, counts in heapq.merge(*(postings.items() for postings in posting_lists)):
                     if doc_id == previous_id:
@@ -104,6 +119,9 @@ def merge_indexes(partials_dir: Path, output_dir: Path) -> dict:
                     if df:
                         output.write(b", ")
                     output.write((json.dumps(doc_id) + ": " + json.dumps(counts, ensure_ascii=False)).encode("utf-8"))
+                    weighted_tf = (counts["tf"] + 3 * counts["title_tf"] +
+                                   2 * counts["heading_tf"] + counts["bold_tf"])
+                    norm_squares[doc_id] += ((1 + math.log(weighted_tf)) * idf) ** 2
                     previous_id = doc_id
                     df += 1
 
@@ -114,6 +132,16 @@ def merge_indexes(partials_dir: Path, output_dir: Path) -> dict:
                 if len(manifest) % 10000 == 0:
                     logger.info(f"Merged {len(manifest)} terms")
 
+        # collect offline ranking information once all documents have been merged
+        duplicate_groups = group_duplicates(document_stats)
+        pagerank = calculate_pagerank(documents, document_stats)
+        with (temp_dir / "document_stats.json").open("w", encoding="utf-8") as file:
+            json.dump({doc_id: {"length": stats["length"], "norm": math.sqrt(norm_squares[doc_id])}
+                       for doc_id, stats in document_stats.items()}, file)
+        with (temp_dir / "duplicates.json").open("w", encoding="utf-8") as file:
+            json.dump(duplicate_groups, file)
+        with (temp_dir / "pagerank.json").open("w", encoding="utf-8") as file:
+            json.dump(pagerank, file)
         with (temp_dir / "manifest.json").open("w", encoding="utf-8") as file:
             json.dump(manifest, file, ensure_ascii=False)
         with (temp_dir / "documents.json").open("w", encoding="utf-8") as file:
@@ -125,6 +153,9 @@ def merge_indexes(partials_dir: Path, output_dir: Path) -> dict:
             "unique_terms": len(manifest),
             "postings": total_postings,
             "tokens": total_tokens,
+            "duplicate_groups": len(set(duplicate_groups.values())),
+            "indexing_seconds": indexing_seconds,
+            "merge_seconds": time.perf_counter() - merge_started,
         }
         with (temp_dir / "metadata.json").open("w", encoding="utf-8") as file:
             json.dump(stats, file, indent=2)
@@ -154,6 +185,10 @@ def main() -> None:
     logger.info(f"Documents: {stats['documents']}")
     logger.info(f"Unique terms: {stats['unique_terms']}")
     logger.info(f"Postings: {stats['postings']}")
+    # time the process for the report
+    logger.info(f"Indexing time: {stats['indexing_seconds']:.2f} seconds")
+    logger.info(f"Merge time: {stats['merge_seconds']:.2f} seconds")
+    logger.info(f"Total processing time: {stats['indexing_seconds'] + stats['merge_seconds']:.2f} seconds")
     logger.info(f"Final index saved to: {args.output}")
 
 

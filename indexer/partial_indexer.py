@@ -4,12 +4,15 @@ import logging
 import shutil
 import tempfile
 import tracemalloc # for tracking memory usage for disk flushes
+import time
 from pathlib import Path
 
-from corpus_loader import document_id, normalize_url, iterate_docs
-from preprocessing import process_document
+from indexer.corpus_loader import document_id, normalize_url, iterate_docs
+from indexer.preprocessing import process_document
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
 
 def load_completed_batches(output_dir: Path, corpus_dir: Path) -> tuple[dict[str, str], set[str], int]:
     """
@@ -36,6 +39,8 @@ def load_completed_batches(output_dir: Path, corpus_dir: Path) -> tuple[dict[str
         # have already been processed
         with metadata_path.open("r", encoding="utf-8") as file:
             metadata = json.load(file)
+        if not (batch_dir / "document_stats.json").is_file():
+            raise ValueError(f"Batch {batch_dir} lacks ranking metadata; use fresh partials directory")
         if metadata["corpus_dir"] != str(corpus_dir.resolve()):
             raise ValueError(f"Batch {batch_dir} was built from a different corpus")
 
@@ -51,23 +56,27 @@ def load_completed_batches(output_dir: Path, corpus_dir: Path) -> tuple[dict[str
                 raise ValueError(f"Duplicate document ID in completed batches: {doc_id}")
             documents[doc_id] = url
 
-        # older batches do not have paths.json
+        # older batches may not have paths.json, so use URL lookup for those
         paths_path = batch_dir / "paths.json"
         if paths_path.is_file():
             with paths_path.open("r", encoding="utf-8") as file:
-                completed_paths.update(json.load(file))
+                batch_paths = json.load(file)
+            completed_paths.update(batch_paths)
 
         next_batch = max(next_batch, int(batch_dir.name[6:]) + 1)
 
     return documents, completed_paths, next_batch
 
 
-def add_document(index: dict, doc_id: str, content: str) -> int:
+def add_document(index: dict, doc_id: str, content: str, url: str = None, document_stats: dict = None) -> int:
     """
     Add document frequencies to the in-memory index.
     Return token count for the doc
     """
-    frequencies = process_document(content)
+    if document_stats is None:
+        frequencies = process_document(content)
+    else:
+        frequencies, details = process_document(content, url, include_metadata=True)
     added_terms = []
     try:
         # add each doc's individual count to that term's dict
@@ -84,12 +93,15 @@ def add_document(index: dict, doc_id: str, content: str) -> int:
                 del index[term]
         raise
 
+    if document_stats is not None:
+        document_stats[doc_id] = details
     # total no. tokens in the entire doc
     return sum(counts["tf"] for counts in frequencies.values())
 
 
 def save_partial_index(output_dir: Path, batch_number: int, corpus_dir: Path,
-                       index: dict, documents: dict[str, str], token_count: int, paths: set[str]) -> Path:
+                       index: dict, documents: dict[str, str], token_count: int,
+                       paths: set[str], document_stats: dict = None, batch_started: float = None) -> Path:
     """
     Save a sorted partial index.
     Unfinished interrupted writes get deleted to avoid confusion
@@ -115,6 +127,11 @@ def save_partial_index(output_dir: Path, batch_number: int, corpus_dir: Path,
         with (temp_dir / "documents.json").open("w", encoding="utf-8") as file:
             json.dump(documents, file, ensure_ascii=False)
 
+        if document_stats is not None:
+            with (temp_dir / "document_stats.json").open("w", encoding="utf-8") as file:
+                json.dump(document_stats, file, ensure_ascii=False)
+
+        # store paths separately to preserve the doc ID -> URL format
         with (temp_dir / "paths.json").open("w", encoding="utf-8") as file:
             json.dump(sorted(paths), file, ensure_ascii=False)
 
@@ -126,6 +143,8 @@ def save_partial_index(output_dir: Path, batch_number: int, corpus_dir: Path,
             "postings": sum(len(postings) for postings in index.values()),
             "tokens": token_count,
         }
+        if batch_started is not None:
+            metadata["elapsed_seconds"] = time.perf_counter() - batch_started
         with (temp_dir / "metadata.json").open("w", encoding="utf-8") as file:
             json.dump(metadata, file, indent=2)
 
@@ -144,10 +163,8 @@ def build_partial_index(corpus_dir: Path, output_dir: Path,
                         max_documents: int = 5000, max_memory_mb: float = 1024,
                         max_batches: int = -1) -> dict:
     """
-    Process max_batches batches (-1 means infinite), then save and exit. Stop on
-    - memory limit (default 1024mb)
-    - document limit (default 5000)
-    - keyboard interrupt
+    Keep indexing until the corpus is finished or the user interrupts.
+    Flush a batch whenever either threshold is reached
     """
     # ensure params are valid
     if max_documents < 1 or max_memory_mb <= 0 or (max_batches < 1 and max_batches != -1):
@@ -159,45 +176,42 @@ def build_partial_index(corpus_dir: Path, output_dir: Path,
     if output_dir.resolve().is_relative_to(corpus_dir.resolve()):
         raise ValueError("Output directory must be outside the corpus")
 
-    # load completed docs
-    logger.info("Loading prior batches...")
     completed_documents, completed_paths, batch_number = load_completed_batches(output_dir, corpus_dir)
-    logger.info(f"Found {len(completed_documents)} completed documents.")
+    initial_completed = len(completed_documents)
     index = {}
     documents = {}
+    document_stats = {}
     batch_paths = set()
-    stats = {"indexed": 0, "already_indexed": 0, "duplicates": 0, "tokens": 0, "batches": 0}
-    # track whether we stopped due to memory, doc count, etc.
-    stop_reason = "corpus complete"
     batch_tokens = 0
-    batch_dir = None
+    stats = {"indexed": 0, "already_indexed": 0, "duplicates": 0, "tokens": 0, "batches_written": 0}
+    stop_reason = "corpus complete"
+    batch_started = time.perf_counter()
 
-    # save the current batch and reset memory for the next one
-    def flush_batch():
-        nonlocal index, documents, batch_paths, batch_tokens, batch_number, batch_dir, baseline
-
+    def flush_batch() -> None:
+        nonlocal index, documents, document_stats, batch_paths, batch_tokens, batch_number, baseline, batch_started
         if not documents:
             return
 
-        logger.info(f"Writing batch {batch_number} with {len(documents)} documents...")
+        logger.info(f"Writing batch {batch_number:04d} with {len(documents)} documents")
         batch_dir = save_partial_index(
-            output_dir, batch_number, corpus_dir,
-            index, documents, batch_tokens, batch_paths
+            output_dir, batch_number, corpus_dir, index, documents, batch_tokens, batch_paths, document_stats, batch_started
         )
-        logger.info(f"Successfully written to disk: {batch_dir}")
+        logger.info(f"Saved partial index to: {batch_dir}")
 
+        # keep completed IDs available so later batches in this run skip duplicates
         completed_documents.update(documents)
         completed_paths.update(batch_paths)
-        stats["batches"] += 1
+        stats["batches_written"] += 1
+        stats["batch_dir"] = str(batch_dir)
         batch_number += 1
 
+        # finished batches are immutable, so the next batch starts empty
         index = {}
         documents = {}
+        document_stats = {}
         batch_paths = set()
+        batch_started = time.perf_counter()
         batch_tokens = 0
-
-        # restart memory tracking so previous batches don't affect the threshold
-        tracemalloc.clear_traces()
         baseline, _ = tracemalloc.get_traced_memory()
 
     # tracemalloc measures Python memory usage
@@ -231,56 +245,53 @@ def build_partial_index(corpus_dir: Path, output_dir: Path,
                 stats["duplicates"] += 1
                 continue
 
-            # parse the full doc and extract token freqs
-            token_count = add_document(index, doc_id, document["content"])
-            batch_tokens += token_count
-            stats["tokens"] += token_count
+            tokens = add_document(index, doc_id, document["content"], url, document_stats)
             documents[doc_id] = url
             batch_paths.add(path.relative_to(corpus_dir).as_posix())
+            batch_tokens += tokens
+            stats["tokens"] += tokens
             stats["indexed"] += 1
 
             # print every 100 docs indexed
             if stats["indexed"] % 100 == 0:
-                current_bytes, _ = tracemalloc.get_traced_memory()
-                logger.info(f"Indexed {stats['indexed']} documents, memory: {(current_bytes - baseline) / 1024**2:.2f} MB")
+                logger.info(f"Indexed {stats['indexed']} new documents")
 
             current_bytes, _ = tracemalloc.get_traced_memory()
-
-            # flush if memory usage is too high or max docs reached
-            if (len(documents) >= max_documents or
-                    (current_bytes - baseline) >= max_memory_mb * 1024 * 1024):
+            if len(documents) >= max_documents or (current_bytes - baseline) >= max_memory_mb * 1024 * 1024:
                 flush_batch()
-
-                if max_batches != -1 and stats["batches"] >= max_batches:
+                if max_batches != -1 and stats["batches_written"] >= max_batches:
                     stop_reason = "batch limit reached"
                     break
 
     except KeyboardInterrupt:
-        # finish by checkpointing the documents already added to the batch
+        # save the completed documents in this batch before exiting
         stop_reason = "interrupted by user"
-        logger.info("\nSaving current batch after Ctrl+C")
-
+        logger.info(f"Interrupted by user, saving current batch")
     finally:
-        # save any remaining documents before exiting
+        # always checkpoint the remaining documents, including at corpus end
         try:
-            if documents and (max_batches == -1 or stats["batches"] < max_batches):
-                flush_batch()
+            flush_batch()
         finally:
             tracemalloc.stop()
 
     stats["stop_reason"] = stop_reason
-    stats["batch_dir"] = str(batch_dir) if batch_dir else None
-    stats["total_completed"] = len(completed_documents)
+    stats["batch_dir"] = stats.get("batch_dir")
+    stats["total_completed"] = initial_completed + stats["indexed"]
+    stats["indexing_seconds"] = sum(
+        json.loads((batch / "metadata.json").read_text(encoding="utf-8")).get("elapsed_seconds", 0)
+        for batch in output_dir.glob("batch_*") if (batch / "metadata.json").is_file()
+    )
     return stats
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build and checkpoint one partial inverted index")
+    logger.info("Starting partial indexer.")
+    parser = argparse.ArgumentParser(description="Build and checkpoint partial inverted indexes")
     parser.add_argument("corpus_dir", type=Path, help="Root folder w/ nested JSON documents")
     parser.add_argument("--output", type=Path, default=Path("artifacts/partials"), help="Folder for completed batches")
-    parser.add_argument("--max-documents", type=int, default=5000, help="Documents to index in this run")
+    parser.add_argument("--max-documents", type=int, default=5000, help="Maximum documents per partial index")
     parser.add_argument("--max-memory-mb", type=float, default=1024, help="Approximate Python allocation increase in MB")
-    parser.add_argument("--max-batches", type=int, default=-1, help="Maximum batches to create (-1 for entire corpus)")
+    parser.add_argument("--max-batches", type=int, default=-1, help="Maximum new batches to write (-1 for all)")
     args = parser.parse_args()
 
     try:
@@ -290,10 +301,11 @@ def main() -> None:
         parser.error(str(exc))
 
     logger.info(f"New documents indexed: {stats['indexed']}")
+    logger.info(f"Accumulated indexing time: {stats['indexing_seconds']:.2f} seconds")
     logger.info(f"Already indexed documents skipped: {stats['already_indexed']}")
     logger.info(f"Duplicate URLs skipped in batch: {stats['duplicates']}")
     logger.info(f"Total completed documents: {stats['total_completed']}")
-    logger.info(f"Batches written: {stats['batches']}")
+    logger.info(f"Batches written: {stats['batches_written']}")
     logger.info(f"Stopped: {stats['stop_reason']}")
     if stats["batch_dir"]:
         logger.info(f"Partial index saved to: {stats['batch_dir']}")
@@ -302,6 +314,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    logger.info("Starting partial indexer.")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", force=True)
     main()

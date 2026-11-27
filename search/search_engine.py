@@ -70,11 +70,13 @@ def intersect_postings(left: dict, right: dict) -> dict:
     return matches
 
 
-def search(query: str, file, manifest: dict, documents: dict, limit: int = 5) -> tuple[list[str], int]:
+def search(query: str, file, manifest: dict, documents: dict, limit: int = 5,
+           document_stats: dict = None, duplicates: dict = None, pagerank: dict = None) -> tuple[list[str], int]:
     """
     Search using AND across every unique normalized query term
     Return up to limit URLs and the total number of matching documents
     Documents are ranked by tf-idf
+    and we use pagerank to further sort results by importance
     """
     # remove unique elements while retaining original order
     terms = list(dict.fromkeys(normalize_tokens(query)))
@@ -105,23 +107,49 @@ def search(query: str, file, manifest: dict, documents: dict, limit: int = 5) ->
                            HEADING_WEIGHT * counts["heading_tf"] +
                            BOLD_WEIGHT * counts["bold_tf"])
             idf = math.log((len(documents) + 1) / (manifest[term]["df"] + 1)) + 1
-            score += (1 + math.log(weighted_tf)) * idf
+            score += (1 + math.log(weighted_tf)) * idf * (idf if document_stats else 1)
+        if document_stats and doc_id in document_stats:
+            score /= max(document_stats[doc_id]["norm"], 1e-12)
+        if pagerank:
+            score += 0.05 * math.log1p(pagerank.get(doc_id, 0) * len(documents))
         scores[doc_id] = score
 
     ranked_ids = sorted(matches, key=lambda doc_id: (-scores[doc_id], doc_id))
+    if duplicates:
+        seen = set()
+        filtered = []
+        for doc_id in ranked_ids:
+            group = duplicates.get(doc_id, doc_id)
+            if group in seen:
+                continue
+            seen.add(group)
+            filtered.append(doc_id)
+            if len(filtered) >= limit:
+                break
+        ranked_ids = filtered
     urls = [documents[doc_id] for doc_id in ranked_ids[:limit]]
     return urls, len(matches)
 
 
 
 class SearchEngine:
-    # context manager
     def __init__(self, index_dir: Path):
         self.manifest, self.documents = load_index(index_dir)
         self.file = (index_dir / "index.jsonl").open("rb")
+        self.document_stats = self.load_optional(index_dir / "document_stats.json")
+        self.duplicates = self.load_optional(index_dir / "duplicates.json")
+        self.pagerank = self.load_optional(index_dir / "pagerank.json")
+
+    @staticmethod
+    def load_optional(path: Path) -> dict:
+        if not path.is_file():
+            return {}
+        with path.open("r", encoding="utf-8") as file:
+            return json.load(file)
 
     def search(self, query: str, limit: int = 5) -> tuple[list[str], int]:
-        return search(query, self.file, self.manifest, self.documents, limit)
+        return search(query, self.file, self.manifest, self.documents, limit,
+                      self.document_stats, self.duplicates, self.pagerank)
 
     def close(self) -> None:
         self.file.close()
