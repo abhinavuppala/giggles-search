@@ -69,4 +69,36 @@ form.addEventListener("submit", async (event) => {
         item.append(title, url, description);
         resultsContainer.appendChild(item);
     }
+
+    // async
+    generateSummary(query, results);
 });
+
+
+async function generateSummary(query, results) {
+    const summaryContent = document.getElementById("summary-content");
+    summaryContent.textContent = "Generating summary...";
+
+    try {
+        const response = await fetch("/api/summarize", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                query: query,
+                urls: results.map(result => result.url)
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Summary failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        summaryContent.textContent = data.summary;
+    } catch (error) {
+        summaryContent.textContent = "Unable to generate AI summary.";
+        console.error(error);
+    }
+}

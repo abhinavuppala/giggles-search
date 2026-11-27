@@ -3,15 +3,21 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Lock
+from pydantic import BaseModel, Field
+from pathlib import Path
+import os
 
 from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
+from dotenv import load_dotenv
 
 from search.search_engine import SearchEngine
+from frontend.summarizer import summarize_results
 
+load_dotenv()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-INDEX_DIR = PROJECT_ROOT / "artifacts" / "index"
+INDEX_DIR = Path(os.getenv("INDEX_DIR", PROJECT_ROOT / "artifacts" / "index"))
 WEB_DIR = Path(__file__).resolve().parent
 
 # the search engine shares one index file handle across requests
@@ -46,6 +52,17 @@ def search(q: str, limit: int = Query(default=5, ge=1, le=100)):
             for url in urls
         ]
     }
+
+
+class SummaryRequest(BaseModel):
+    query: str = Field(max_length=500)
+    urls: list[str] = Field(max_length=5)
+
+
+@app.post("/api/summarize")
+async def summarize(request: SummaryRequest):
+    summary = await summarize_results(request.query, request.urls)
+    return {"summary": summary}
 
 
 # serve the existing html/css/js from the same server

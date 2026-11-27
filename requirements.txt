@@ -2,3 +2,5 @@ nltk
 beautifulsoup4
 fastapi
 uvicorn
+openai
+python-dotenv

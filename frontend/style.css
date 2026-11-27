@@ -1,3 +1,4 @@
+
 /* ============================================
    Google 1998 — Faithful Recreation Stylesheet
    ============================================ */
@@ -21,6 +22,13 @@ body {
     align-items: center;
 }
 
+main {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
 /* Header */
 header {
     text-align: center;
@@ -32,17 +40,32 @@ header {
     height: auto;
 }
 
+.giggles-logo {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 88px;
+    font-weight: bold;
+    letter-spacing: -5px;
+    text-align: center;
+    line-height: 1.2;
+    text-shadow: 2px 3px 1px #999;
+}
+
+.blue { color: #3366cc; }
+.red { color: #dc3912; }
+.yellow { color: #ffcc00; }
+.green { color: #109618; }
+
 /* Search Container */
 .search-container {
     width: 100%;
     max-width: 600px;
     padding: 0 20px;
+    text-align: center;
 }
 
 .search-box {
     background-color: #eaeaea;
     padding: 16px 24px 20px;
-    margin: 0 auto;
     text-align: center;
 }
 
@@ -160,65 +183,12 @@ header {
     background: #d0d0d0;
 }
 
-/* Footer */
-footer {
-    text-align: center;
-    padding: 40px 20px 20px;
-    font-size: 12px;
-    color: #666;
-    margin-top: auto;
-}
-
-footer .meta {
-    margin-top: 4px;
-    font-size: 11px;
-    color: #999;
-}
-
-footer .meta a {
-    color: #0000cc;
-}
-
-.giggles-logo {
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: 88px;
-    font-weight: bold;
-    letter-spacing: -5px;
-    text-align: center;
-    line-height: 1.2;
-    text-shadow: 2px 3px 1px #999;
-}
-
-.blue { color: #3366cc; }
-.red { color: #dc3912; }
-.yellow { color: #ffcc00; }
-.green { color: #109618; }
-
-
-/* Responsive */
-@media (max-width: 480px) {
-    .logo {
-        max-width: 200px;
-    }
-
-    .info-cards {
-        flex-direction: column;
-        gap: 4px;
-    }
-
-    .card {
-        min-height: auto;
-        padding: 8px;
-    }
-
-    .search-input {
-        width: 100%;
-    }
-}
-
+/* AI Summary and Search Results */
 .summary-section,
 .results-section {
-    width: min(90%, 720px);
+    width: 90%;
+    max-width: 720px;
+    min-width: 0;
     margin: 24px auto;
     text-align: left;
     font-family: Arial, sans-serif;
@@ -229,16 +199,17 @@ footer .meta a {
     background: #f5f5f5;
     padding: 12px 16px;
     min-height: 85px;
-    box-sizing: border-box;
 }
 
 .summary-section h2 {
     font-size: 16px;
-    margin: 0 0 10px;
+    margin-bottom: 10px;
 }
 
 .summary-content {
     min-height: 40px;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
 }
 
 .search-stats {
@@ -270,4 +241,48 @@ footer .meta a {
 
 [hidden] {
     display: none !important;
+}
+
+/* Footer */
+footer {
+    text-align: center;
+    padding: 40px 20px 20px;
+    font-size: 12px;
+    color: #666;
+    margin-top: auto;
+}
+
+footer .meta {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #999;
+}
+
+footer .meta a {
+    color: #0000cc;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+    .logo {
+        max-width: 200px;
+    }
+
+    .giggles-logo {
+        font-size: 64px;
+    }
+
+    .info-cards {
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .card {
+        min-height: auto;
+        padding: 8px;
+    }
+
+    .search-input {
+        width: 100%;
+    }
 }
