@@ -1,6 +1,7 @@
 import json
 import math
 from pathlib import Path
+import time
 
 from indexer.preprocessing import normalize_tokens
 
@@ -9,6 +10,13 @@ BODY_WEIGHT = 1.0
 TITLE_WEIGHT = 3.0
 HEADING_WEIGHT = 2.0
 BOLD_WEIGHT = 1.0
+
+# common words that contribute little to search relevance
+# VERY conservative list compared to crawler project
+STOPWORDS = {
+    "a", "an", "the", "is", "are",
+    "do", "does", "i", "to", "what",
+}
 
 
 def load_index(index_dir: Path) -> tuple[dict, dict]:
@@ -78,22 +86,43 @@ def search(query: str, file, manifest: dict, documents: dict, limit: int = 5,
     Documents are ranked by tf-idf
     and we use pagerank to further sort results by importance
     """
+    start_time = time.perf_counter()
+
     # remove unique elements while retaining original order
     terms = list(dict.fromkeys(normalize_tokens(query)))
     if not terms:
         return [], 0
 
+    # filter common words for longer queries to reduce posting reads
+    # only keep stopwords if its a very short query
+    if len(terms) > 3:
+        filtered_terms = [term for term in terms if term not in STOPWORDS]
+        if filtered_terms:
+            terms = filtered_terms
+
     # check the shortest posting lists first to reduce intermediate results
     if any(term not in manifest for term in terms):
         return [], 0
     terms.sort(key=lambda term: manifest[term]["df"])
+    preprocess_end = time.perf_counter()
 
-    postings = {term: get_postings(file, manifest, term) for term in terms}
+    postings = {}
+    for term in terms:
+        start = time.perf_counter()
+        postings[term] = get_postings(file, manifest, term)
+        elapsed = (time.perf_counter() - start) * 1000
+
+        # print(f"  {term}: df={manifest[term]['df']}, "
+        #     f"size={manifest[term]['length'] / 1024:.2f} KB, "
+        #     f"read={elapsed:.4f} ms")
+    postings_end = time.perf_counter()
+    
     matches = postings[terms[0]]
     for term in terms[1:]:
         if not matches:
             break
         matches = intersect_postings(matches, postings[term])
+    intersection_end = time.perf_counter()
 
     # combine term frequency with important tag counts before applying tf-idf
     # we give different weightage to body, title, heading, bold
@@ -113,6 +142,7 @@ def search(query: str, file, manifest: dict, documents: dict, limit: int = 5,
         if pagerank:
             score += 0.05 * math.log1p(pagerank.get(doc_id, 0) * len(documents))
         scores[doc_id] = score
+    scoring_end = time.perf_counter()
 
     ranked_ids = sorted(matches, key=lambda doc_id: (-scores[doc_id], doc_id))
     if duplicates:
@@ -128,6 +158,25 @@ def search(query: str, file, manifest: dict, documents: dict, limit: int = 5,
                 break
         ranked_ids = filtered
     urls = [documents[doc_id] for doc_id in ranked_ids[:limit]]
+    ranking_end = time.perf_counter()
+
+    # print time used for each stage of search
+    # gives observability into how we can improve efficiency
+    timings = {
+        "preprocessing": (preprocess_end - start_time) * 1000,
+        "postings": (postings_end - preprocess_end) * 1000,
+        "intersection": (intersection_end - postings_end) * 1000,
+        "scoring": (scoring_end - intersection_end) * 1000,
+        "ranking": (ranking_end - scoring_end) * 1000,
+        "total": (ranking_end - start_time) * 1000,
+    }
+
+    # print(f"\nQuery profile: {query}")
+    # for stage, elapsed in timings.items():
+    #     print(f"  {stage}: {elapsed:.4f} ms")
+    # print(f"  matching documents: {len(matches)}")
+    # print(f"  query terms: {len(terms)}")
+
     return urls, len(matches)
 
 
